@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  ai_search_os:
+    build: .
+    container_name: ai_search_os
+    ports:
+      - "8000:8000"     # 浏览器访问 http://localhost:8000
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux 需要这行；Mac/Windows Docker Desktop 自带
+    restart: unless-stopped
