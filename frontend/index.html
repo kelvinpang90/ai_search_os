@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM & ERP AI 智能助手</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: #1f2a44;
+    color: #fff;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  #lang-btn {
+    background: #344266;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #lang-btn:hover { background: #455584; }
+
+  #shortcuts {
+    background: #fff;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 10px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  .shortcut-btn {
+    background: #eef1f8;
+    color: #1f2a44;
+    border: 1px solid #d6dcec;
+    border-radius: 16px;
+    padding: 5px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .shortcut-btn:hover { background: #dde4f5; }
+
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .msg {
+    max-width: 75%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    line-height: 1.6;
+    font-size: 14px;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: #1f6feb;
+    color: #fff;
+    border-bottom-right-radius: 2px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: #fff;
+    color: #1a1a1a;
+    border: 1px solid #e0e0e0;
+    border-bottom-left-radius: 2px;
+  }
+  .msg.assistant table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+  .msg.assistant th, .msg.assistant td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+  }
+  .msg.assistant th { background: #f5f5f5; }
+  .msg.assistant code {
+    background: #f0f0f0;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .msg.thinking {
+    align-self: flex-start;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    color: #888;
+    font-style: italic;
+  }
+  .dots span {
+    display: inline-block;
+    animation: blink 1.4s infinite both;
+  }
+  .dots span:nth-child(2) { animation-delay: 0.2s; }
+  .dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  #input-bar {
+    background: #fff;
+    border-top: 1px solid #e0e0e0;
+    padding: 12px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  #input {
+    flex: 1;
+    resize: none;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    max-height: 120px;
+    outline: none;
+  }
+  #input:focus { border-color: #1f6feb; }
+  #voice-btn, #send-btn {
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 10px 16px;
+  }
+  #voice-btn {
+    background: #eef1f8;
+    color: #1f2a44;
+    font-size: 18px;
+    padding: 10px 14px;
+  }
+  #voice-btn.recording {
+    background: #e74c3c;
+    color: #fff;
+  }
+  #send-btn {
+    background: #1f6feb;
+    color: #fff;
+    font-weight: 600;
+  }
+  #send-btn:hover { background: #1a5fd0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="title">CRM &amp; ERP AI 智能助手</h1>
+  <button id="lang-btn" onclick="toggleLang()">中文</button>
+</header>
+
+<div id="shortcuts"></div>
+
+<div id="chat"></div>
+
+<div id="input-bar">
+  <button id="voice-btn" onclick="toggleVoice()" title="语音输入">🎤</button>
+  <textarea id="input" rows="1" placeholder="输入你的问题，例如：上个月的总销售额是多少？"></textarea>
+  <button id="send-btn" onclick="sendMessage()">发送</button>
+</div>
+
+<script>
+let history = [];
+const MAX_HISTORY = 20; // 前端也限制，双重保险
+
+const SHORTCUTS = [
+  ['上个月的总销售额是多少？', 'What was the total sales last month?'],
+  ['销售额最高的前 5 个客户是谁？', 'Who are the top 5 customers by sales?'],
+  ['今年每个月的销售额趋势？', 'Show me the monthly sales trend this year.'],
+  ['本月和上月的销售额对比', "Compare this month's sales vs last month."],
+  ['哪个仓库的销售额最高？', 'Which warehouse has the highest sales?'],
+  ['今年到目前的累计销售额是多少？', 'What is the YTD total sales so far?'],
+  ['最近 7 天有哪些新订单？', 'What are the new orders in the last 7 days?'],
+  ['哪些订单还未完成发货？', 'Which orders have not been fully shipped yet?'],
+  ['客户 XX 最近 3 个月下了多少单？', 'How many orders did customer XX place in the last 3 months?'],
+  ['超过 90 天没有再次购买的客户有哪些？', "Which customers haven't ordered in the last 90 days?"],
+  ['信用额度最高的前 10 个客户', 'List the top 10 customers by credit limit.'],
+  ['B2B 和 B2C 客户各有多少？', 'How many B2B vs B2C customers do we have?'],
+  ['哪些客户有未收款的发票？', 'Which customers have outstanding unpaid invoices?'],
+  ['逾期未付款的客户列表', 'List customers with overdue invoices.'],
+  ['目前谈判阶段的商机有哪些？总金额是多少？', "What deals are in negotiating stage? What's the total value?"],
+  ['本月新增的商机有哪些？', 'What new deals were created this month?'],
+  ['本月成交（won）的商机统计', 'Summarize the won deals this month.'],
+  ['每个销售员各有多少个进行中的商机？', 'How many active deals does each salesperson have?'],
+  ['金额最高的 10 个商机', 'List the top 10 deals by amount.'],
+  ['哪些高优先级商机还没有跟进记录？', 'Which high-priority deals have no activity logged?'],
+  ['各销售员的商机总金额对比', 'Compare total deal amounts by salesperson.'],
+  ['哪些商品库存低于补货触发点？', 'Which products are below the reorder point?'],
+  ['哪些商品库存低于安全库存？', 'Which products are below the safety stock level?'],
+  ['各仓库的库存总量', 'Show total stock quantity by warehouse.'],
+  ['商品 XX 在各仓库的可用库存是多少？', 'What is the available stock of product XX across all warehouses?'],
+  ['库存可用量为零的商品列表', 'List products with zero available stock.'],
+  ['库存总价值最高的前 10 个商品', 'Top 10 products by total inventory value (qty × avg cost).'],
+  ['本月收到了多少款项？', 'How much payment was received this month?'],
+  ['目前未收款的发票总金额是多少？', 'What is the total amount of unpaid invoices?'],
+  ['30 天以上未收款的发票有哪些？', 'List invoices unpaid for more than 30 days.'],
+  ['各付款方式的收款金额占比', 'Break down payment received by payment method.'],
+  ['本月各销售员的目标金额是多少？', 'What are the sales targets for each rep this month?'],
+  ['各销售员目标达成情况', 'How is each salesperson tracking against their target?'],
+  ['销售额最高的 3 个客户，他们在 CRM 里有没有进行中的商机？', 'Which top customers have active CRM deals we should prioritize?'],
+  ['哪些客户有逾期未付款发票，且在 CRM 里还有跟进中的商机？', 'Which customers have overdue invoices but still have ongoing deals in CRM?'],
+];
+
+let currentLang = 'zh-CN';
+
+const UI_TEXT = {
+  'zh-CN': {
+    title: 'CRM & ERP AI 智能助手',
+    langBtn: '中文',
+    placeholder: '输入你的问题，例如：上个月的总销售额是多少？',
+    send: '发送',
+    thinking: '思考中',
+    error: '查询失败，请稍后重试。',
+  },
+  'en-US': {
+    title: 'CRM & ERP AI Assistant',
+    langBtn: 'EN',
+    placeholder: 'Ask a question, e.g. What was the total sales last month?',
+    send: 'Send',
+    thinking: 'Thinking',
+    error: 'Query failed, please try again later.',
+  },
+};
+
+function renderShortcuts() {
+  const box = document.getElementById('shortcuts');
+  box.innerHTML = '';
+  SHORTCUTS.forEach(([zh, en]) => {
+    const btn = document.createElement('button');
+    btn.className = 'shortcut-btn';
+    btn.textContent = currentLang === 'zh-CN' ? zh : en;
+    btn.onclick = () => {
+      const input = document.getElementById('input');
+      input.value = currentLang === 'zh-CN' ? zh : en;
+      input.focus();
+    };
+    box.appendChild(btn);
+  });
+}
+
+function appendMessage(role, html) {
+  const chat = document.getElementById('chat');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = html;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function showThinking() {
+  const text = UI_TEXT[currentLang].thinking;
+  return appendMessage('thinking', text + '<span class="dots"><span>.</span><span>.</span><span>.</span></span>');
+}
+
+async function sendMessage() {
+  const input = document.getElementById('input');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  appendMessage('user', escapeHtml(msg));
+  input.value = '';
+  autoResize();
+
+  const thinkingEl = showThinking();
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history })
+    });
+    const data = await res.json();
+
+    history.push({ role: 'user', content: msg });
+    history.push({ role: 'assistant', content: data.reply });
+    if (history.length > MAX_HISTORY * 2) {
+      history = history.slice(-MAX_HISTORY * 2);
+    }
+
+    thinkingEl.remove();
+    appendMessage('assistant', marked.parse(data.reply));
+  } catch (e) {
+    thinkingEl.remove();
+    appendMessage('assistant', UI_TEXT[currentLang].error);
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function autoResize() {
+  const input = document.getElementById('input');
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+}
+
+document.getElementById('input').addEventListener('input', autoResize);
+document.getElementById('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// ---- 语言切换 ----
+function toggleLang() {
+  currentLang = currentLang === 'zh-CN' ? 'en-US' : 'zh-CN';
+  const text = UI_TEXT[currentLang];
+  document.getElementById('lang-btn').textContent = text.langBtn;
+  document.getElementById('title').textContent = text.title;
+  document.getElementById('input').placeholder = text.placeholder;
+  document.getElementById('send-btn').textContent = text.send;
+  if (recognition) recognition.lang = currentLang;
+  renderShortcuts();
+}
+
+// ---- 语音输入 ----
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceBtn = document.getElementById('voice-btn');
+let recognition = null;
+let isRecording = false;
+
+if (!SpeechRecognition) {
+  voiceBtn.style.display = 'none';
+} else {
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = currentLang;
+
+  recognition.onresult = (event) => {
+    const transcript = Array.from(event.results)
+      .map(r => r[0].transcript).join('');
+    document.getElementById('input').value = transcript;
+    autoResize();
+  };
+
+  recognition.onend = () => {
+    isRecording = false;
+    voiceBtn.classList.remove('recording');
+  };
+
+  recognition.onerror = (e) => {
+    isRecording = false;
+    voiceBtn.classList.remove('recording');
+    if (e.error === 'not-allowed') {
+      alert('请在浏览器设置中允许麦克风权限');
+    }
+  };
+}
+
+function toggleVoice() {
+  if (!recognition) return;
+  if (isRecording) {
+    recognition.stop();
+  } else {
+    recognition.lang = currentLang;
+    recognition.start();
+    isRecording = true;
+    voiceBtn.classList.add('recording');
+  }
+}
+
+renderShortcuts();
+</script>
+
+</body>
+</html>
