@@ -1,12 +1,42 @@
-version: '3.8'
+# 生产部署 compose（VPS 上 `docker compose ...` 直接使用）
+#
+# 前置：
+#   1. vps_infra 栈已起（独立仓库），external network proxy_net 和 data_net 已存在
+#   2. infra_mysql 已执行 setup_readonly_user.sql，创建 ai_readonly 只读账号
+#   3. ghcr.io 镜像已由 .github/workflows/deploy.yml 推送
+#   4. /srv/infra/nginx/conf.d/aisearch.conf 已就位（见仓库 nginx/conf.d/aisearch.conf）
+#
+# service key 加 aisearch_ 前缀，避免与 crm_os / erp_os 的同名 service
+# 在共享 proxy_net 上产生 DNS 别名冲突。
+#
+# 启动：
+#   cp .env.production.example .env && vim .env
+#   docker login ghcr.io
+#   docker compose pull
+#   docker compose up -d
+
+x-tz: &tz
+  TZ: Asia/Kuala_Lumpur
+
+networks:
+  proxy_net:
+    external: true
+  data_net:
+    external: true
 
 services:
-  ai_search_os:
-    build: .
-    container_name: ai_search_os
-    ports:
-      - "8000:8000"     # 浏览器访问 http://localhost:8000
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Linux 需要这行；Mac/Windows Docker Desktop 自带
+  aisearch_backend:
+    image: ghcr.io/${GHCR_OWNER}/ai_search_os-backend:${IMAGE_TAG:-latest}
+    container_name: aisearch_backend
     restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *tz
+    networks: [proxy_net, data_net]
+    # 不发布 host 端口；nginx 通过 proxy_net 访问 aisearch_backend:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
