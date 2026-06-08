@@ -30,6 +30,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个 CRM/ERP 业务数据助手，通过工�
   因为 ERP 是多租户系统。
 - 展示和统计金额时统一使用 base_currency_amount（本位币金额），不要用 total_incl_tax。
   如需展示原始币种金额，同时给出 currency 和 total_incl_tax。
+- CRM 数据库（deals、sales_targets 等）中的金额字段没有货币信息，其单位均为马来西亚林吉特，
+  展示时请使用 "RM" 前缀（例如 RM 400,000），不要使用 "¥" 或其他货币符号。
 - 所有查询都必须排除软删除和无效记录：deleted_at IS NULL、is_active = 1；
   统计销售额时还要排除已取消（CANCELLED）和草稿（DRAFT）订单。
 - 内置的 7 个工具已经处理好上述过滤逻辑，优先使用它们；
