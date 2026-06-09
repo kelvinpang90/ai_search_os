@@ -78,4 +78,14 @@ jobs:
             echo "::warning::AISEARCH_PUBLIC_URL secret not set — skipping smoke test."
             exit 0
           fi
-          curl -fsS --max-time 10 "${AISEARCH_PUBLIC_URL%/}/health" | tee /dev/stderr | grep -q '"status"'
+          echo "Waiting for container to be ready..."
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 5 "${AISEARCH_PUBLIC_URL%/}/health" | grep -q '"status"'; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt $i/12 failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Service did not become healthy after 60s."
+          exit 1
