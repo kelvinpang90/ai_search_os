@@ -6,7 +6,11 @@ import httpx
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
+pwd_context = CryptContext(
+    schemes=['bcrypt'],
+    deprecated='auto',
+    bcrypt__truncate_error=False,  # 与 CRM 保持一致：超 72 字节时截断而非报错
+)
 
 JWT_SECRET = os.getenv('JWT_SECRET', '')
 JWT_EXPIRE_HOURS = int(os.getenv('JWT_EXPIRE_HOURS', 24))
