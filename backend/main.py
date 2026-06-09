@@ -63,7 +63,7 @@ async def login(body: dict, request: Request):
     # 查 CRM 用户（password_hash 仅登录接口内可访问）
     rows = crm_query(
         'SELECT id, name, email, role, password_hash FROM users'
-        ' WHERE email = %s AND is_active = 1 AND deleted_at IS NULL',
+        ' WHERE email = %s AND is_active = 1',
         (email,),
     )
 
