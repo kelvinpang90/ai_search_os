@@ -263,17 +263,17 @@
 <!-- ── 登录弹窗 ── -->
 <div id="login-overlay">
   <div id="login-box">
-    <h2>请登录</h2>
+    <h2 data-i18n="loginTitle">请登录</h2>
     <div class="login-field">
-      <label>邮箱</label>
+      <label data-i18n="emailLabel">邮箱</label>
       <input type="email" id="login-email" placeholder="your@email.com" autocomplete="email">
     </div>
     <div class="login-field">
-      <label>密码</label>
+      <label data-i18n="pwdLabel">密码</label>
       <input type="password" id="login-pwd" placeholder="••••••••" autocomplete="current-password">
     </div>
     <div id="login-error"></div>
-    <button id="login-submit" onclick="doLogin()">登录</button>
+    <button id="login-submit" data-i18n="loginBtn" onclick="doLogin()">登录</button>
   </div>
 </div>
 
@@ -361,10 +361,19 @@ const UI_TEXT = {
     send: '发送',
     thinking: '思考中',
     error: '查询失败，请稍后重试。',
+    // 登录弹窗
     loginTitle: '请登录',
     loginBtn: '登录',
     emailLabel: '邮箱',
     pwdLabel: '密码',
+    loginErrorWrong: '邮箱或密码错误，请重试',
+    loginErrorCaptcha: '系统检测到异常操作，请稍后再试',
+    loginErrorNetwork: '网络错误，请稍后重试',
+    // 导出
+    exportBtn: '📥 导出 Excel',
+    // 冷却 / 限速
+    cooldownToast: (s) => `请等待 ${s} 秒后再查询`,
+    rateLimitToast: '操作过于频繁，请稍候再试',
   },
   'en-US': {
     title: 'CRM & ERP AI Assistant',
@@ -373,10 +382,19 @@ const UI_TEXT = {
     send: 'Send',
     thinking: 'Thinking',
     error: 'Query failed, please try again later.',
+    // login modal
     loginTitle: 'Please Log In',
     loginBtn: 'Log In',
     emailLabel: 'Email',
     pwdLabel: 'Password',
+    loginErrorWrong: 'Invalid email or password, please try again',
+    loginErrorCaptcha: 'Suspicious activity detected, please try again later',
+    loginErrorNetwork: 'Network error, please try again later',
+    // export
+    exportBtn: '📥 Export Excel',
+    // cooldown / rate limit
+    cooldownToast: (s) => `Please wait ${s} seconds before querying`,
+    rateLimitToast: 'Too many requests, please try again later',
   },
 };
 
@@ -464,15 +482,13 @@ async function doLogin() {
     } else {
       failCount++;
       const detail = (await res.json().catch(() => ({}))).detail || '';
-      if (detail === 'recaptcha_failed') {
-        errEl.textContent = '系统检测到异常操作，请稍后再试';
-      } else {
-        errEl.textContent = '邮箱或密码错误，请重试';
-      }
+      errEl.textContent = detail === 'recaptcha_failed'
+        ? UI_TEXT[currentLang].loginErrorCaptcha
+        : UI_TEXT[currentLang].loginErrorWrong;
       errEl.style.display = 'block';
     }
   } catch (_) {
-    errEl.textContent = '网络错误，请稍后重试';
+    errEl.textContent = UI_TEXT[currentLang].loginErrorNetwork;
     errEl.style.display = 'block';
   }
 
@@ -567,7 +583,7 @@ function renderAssistantMessage(rawText) {
   if (hasTable(rawText)) {
     const btn = document.createElement('button');
     btn.className = 'export-btn';
-    btn.textContent = '📥 导出 Excel';
+    btn.textContent = UI_TEXT[currentLang].exportBtn;
     btn.onclick = () => exportExcel(rawText);
     div.appendChild(btn);
   }
@@ -596,7 +612,7 @@ async function sendMessage() {
   const elapsed = (Date.now() - lastQueryTime) / 1000;
   if (elapsed < COOLDOWN_SEC && lastQueryTime > 0) {
     const remain = Math.ceil(COOLDOWN_SEC - elapsed);
-    showToast(`请等待 ${remain} 秒后再查询`);
+    showToast(UI_TEXT[currentLang].cooldownToast(remain));
     return;
   }
 
@@ -631,7 +647,7 @@ async function sendMessage() {
     // 后端限速（极罕见，前端冷却已覆盖大部分情况）
     if (res.status === 429) {
       thinkingEl.remove();
-      showToast('操作过于频繁，请稍候再试');
+      showToast(UI_TEXT[currentLang].rateLimitToast);
       return;
     }
 
@@ -696,15 +712,25 @@ function renderShortcuts() {
 function toggleLang() {
   currentLang = currentLang === 'zh-CN' ? 'en-US' : 'zh-CN';
   const text = UI_TEXT[currentLang];
-  document.getElementById('lang-btn').textContent  = text.langBtn;
-  document.getElementById('title').textContent     = text.title;
-  document.getElementById('input').placeholder     = text.placeholder;
-  document.getElementById('login-box').querySelector('h2').textContent = text.loginTitle;
-  document.getElementById('login-submit').textContent = text.loginBtn;
-  // 冷却期间保留倒计时数字，不覆盖
+
+  // 所有带 data-i18n 属性的静态元素（含登录弹窗标签、按钮）
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (typeof text[key] === 'string') el.textContent = text[key];
+  });
+
+  // 动态元素（无法用 data-i18n 的）
+  document.getElementById('lang-btn').textContent = text.langBtn;
+  document.getElementById('input').placeholder    = text.placeholder;
   if (!cooldownTimer) {
     document.getElementById('send-btn').textContent = text.send;
   }
+
+  // 已渲染在聊天中的导出按钮
+  document.querySelectorAll('.export-btn').forEach(btn => {
+    btn.textContent = text.exportBtn;
+  });
+
   if (recognition) recognition.lang = currentLang;
   renderShortcuts();
 }
