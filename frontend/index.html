@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CRM & ERP AI 智能助手</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -152,15 +153,132 @@
     background: #e74c3c;
     color: #fff;
   }
+  #voice-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #send-btn {
     background: #1f6feb;
     color: #fff;
     font-weight: 600;
+    min-width: 60px;
   }
-  #send-btn:hover { background: #1a5fd0; }
+  #send-btn:hover:not(:disabled) { background: #1a5fd0; }
+  #send-btn:disabled { background: #8baee0; cursor: not-allowed; }
+
+  /* ── Excel 导出按钮 ── */
+  .export-btn {
+    display: inline-block;
+    margin-top: 10px;
+    background: #f0f4ff;
+    color: #1f2a44;
+    border: 1px solid #c5d0ea;
+    border-radius: 6px;
+    padding: 5px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .export-btn:hover { background: #dde4f5; }
+
+  /* ── Toast 提示 ── */
+  #toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    padding: 8px 22px;
+    border-radius: 20px;
+    font-size: 13px;
+    display: none;
+    z-index: 500;
+    pointer-events: none;
+  }
+
+  /* ── 登录弹窗 ── */
+  #login-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.52);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  #login-overlay.show { display: flex; }
+  #login-box {
+    background: #fff;
+    border-radius: 14px;
+    padding: 36px 32px 28px;
+    width: 360px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  }
+  #login-box h2 {
+    font-size: 20px;
+    color: #1f2a44;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  .login-field { margin-bottom: 16px; }
+  .login-field label {
+    display: block;
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+  .login-field input {
+    width: 100%;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+  .login-field input:focus { border-color: #1f6feb; }
+  #login-error {
+    color: #e74c3c;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+    text-align: center;
+  }
+  #recaptcha-container { margin-bottom: 14px; display: flex; justify-content: center; }
+  #login-submit {
+    width: 100%;
+    background: #1f6feb;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #login-submit:hover { background: #1a5fd0; }
+  #login-submit:disabled { background: #8baee0; cursor: not-allowed; }
 </style>
 </head>
 <body>
+
+<!-- ── 登录弹窗 ── -->
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>请登录</h2>
+    <div class="login-field">
+      <label>邮箱</label>
+      <input type="email" id="login-email" placeholder="your@email.com" autocomplete="email">
+    </div>
+    <div class="login-field">
+      <label>密码</label>
+      <input type="password" id="login-pwd" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <div id="login-error"></div>
+    <div id="recaptcha-container"></div>
+    <button id="login-submit" onclick="doLogin()">登录</button>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast"></div>
 
 <header>
   <h1 id="title">CRM &amp; ERP AI 智能助手</h1>
@@ -178,9 +296,25 @@
 </div>
 
 <script>
+// ════════════════════════════════════════════════════════
+// 常量与状态
+// ════════════════════════════════════════════════════════
 let history = [];
-const MAX_HISTORY = 20; // 前端也限制，双重保险
+const MAX_HISTORY = 20;
+const COOLDOWN_SEC = 20;
+const TOKEN_KEY = 'ai_assistant_token';
+const TOKEN_EXP_KEY = 'ai_assistant_exp';
 
+let currentLang = 'zh-CN';
+let lastQueryTime = 0;
+let cooldownTimer = null;
+let recaptchaSiteKey = '';
+let recaptchaWidgetId = null;
+let failCount = 0;
+
+// ════════════════════════════════════════════════════════
+// 快捷问题列表
+// ════════════════════════════════════════════════════════
 const SHORTCUTS = [
   ['上个月的总销售额是多少？', 'What was the total sales last month?'],
   ['销售额最高的前 5 个客户是谁？', 'Who are the top 5 customers by sales?'],
@@ -219,8 +353,6 @@ const SHORTCUTS = [
   ['哪些客户有逾期未付款发票，且在 CRM 里还有跟进中的商机？', 'Which customers have overdue invoices but still have ongoing deals in CRM?'],
 ];
 
-let currentLang = 'zh-CN';
-
 const UI_TEXT = {
   'zh-CN': {
     title: 'CRM & ERP AI 智能助手',
@@ -229,6 +361,10 @@ const UI_TEXT = {
     send: '发送',
     thinking: '思考中',
     error: '查询失败，请稍后重试。',
+    loginTitle: '请登录',
+    loginBtn: '登录',
+    emailLabel: '邮箱',
+    pwdLabel: '密码',
   },
   'en-US': {
     title: 'CRM & ERP AI Assistant',
@@ -237,32 +373,220 @@ const UI_TEXT = {
     send: 'Send',
     thinking: 'Thinking',
     error: 'Query failed, please try again later.',
+    loginTitle: 'Please Log In',
+    loginBtn: 'Log In',
+    emailLabel: 'Email',
+    pwdLabel: 'Password',
   },
 };
 
-function renderShortcuts() {
-  const box = document.getElementById('shortcuts');
-  box.innerHTML = '';
-  SHORTCUTS.forEach(([zh, en]) => {
-    const btn = document.createElement('button');
-    btn.className = 'shortcut-btn';
-    btn.textContent = currentLang === 'zh-CN' ? zh : en;
-    btn.onclick = () => {
-      const input = document.getElementById('input');
-      input.value = currentLang === 'zh-CN' ? zh : en;
-      input.focus();
-    };
-    box.appendChild(btn);
-  });
+// ════════════════════════════════════════════════════════
+// Token / 登录状态
+// ════════════════════════════════════════════════════════
+function isLoggedIn() {
+  const exp = localStorage.getItem(TOKEN_EXP_KEY);
+  return exp && Date.now() < parseInt(exp);
 }
 
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXP_KEY);
+}
+
+// ════════════════════════════════════════════════════════
+// 登录弹窗
+// ════════════════════════════════════════════════════════
+function showLoginModal() {
+  document.getElementById('login-overlay').classList.add('show');
+  document.getElementById('login-email').focus();
+}
+
+function hideLoginModal() {
+  document.getElementById('login-overlay').classList.remove('show');
+}
+
+function showRecaptcha() {
+  if (!recaptchaSiteKey) return;
+  const container = document.getElementById('recaptcha-container');
+  if (recaptchaWidgetId !== null) return; // 已经渲染过
+
+  function renderWidget() {
+    recaptchaWidgetId = grecaptcha.render(container, { sitekey: recaptchaSiteKey });
+  }
+
+  if (window.grecaptcha && window.grecaptcha.render) {
+    renderWidget();
+  } else {
+    // 动态加载 reCAPTCHA 脚本
+    window._onRecaptchaLoad = renderWidget;
+    const s = document.createElement('script');
+    s.src = 'https://www.google.com/recaptcha/api.js?render=explicit&onload=_onRecaptchaLoad&hl=' +
+            (currentLang === 'zh-CN' ? 'zh-CN' : 'en');
+    document.head.appendChild(s);
+  }
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pwd   = document.getElementById('login-pwd').value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-submit');
+
+  errEl.style.display = 'none';
+  btn.disabled = true;
+
+  const body = { email, password: pwd };
+
+  // 失败 3 次后附上 reCAPTCHA token
+  if (failCount >= 3 && window.grecaptcha && recaptchaWidgetId !== null) {
+    const rcToken = grecaptcha.getResponse(recaptchaWidgetId);
+    if (!rcToken) {
+      errEl.textContent = '请完成 reCAPTCHA 验证';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      return;
+    }
+    body.recaptcha_token = rcToken;
+  }
+
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(TOKEN_EXP_KEY, String(Date.now() + 24 * 3600 * 1000));
+      hideLoginModal();
+      failCount = 0;
+    } else {
+      failCount++;
+      const detail = (await res.json().catch(() => ({}))).detail || '';
+
+      if (failCount >= 3 && recaptchaSiteKey) {
+        showRecaptcha();
+      }
+      if (recaptchaWidgetId !== null && window.grecaptcha) {
+        grecaptcha.reset(recaptchaWidgetId);
+      }
+
+      if (detail === 'need_recaptcha' || detail === 'recaptcha_failed') {
+        errEl.textContent = '请完成 reCAPTCHA 验证后重试';
+      } else {
+        errEl.textContent = '邮箱或密码错误，请重试';
+      }
+      errEl.style.display = 'block';
+    }
+  } catch (_) {
+    errEl.textContent = '网络错误，请稍后重试';
+    errEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+}
+
+// Enter 键：email → 跳到密码框，pwd → 触发登录
+document.getElementById('login-email').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('login-pwd').focus();
+});
+document.getElementById('login-pwd').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// ════════════════════════════════════════════════════════
+// Toast
+// ════════════════════════════════════════════════════════
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 2000);
+}
+
+// ════════════════════════════════════════════════════════
+// 冷却倒计时
+// ════════════════════════════════════════════════════════
+function startCooldown() {
+  const sendBtn  = document.getElementById('send-btn');
+  const voiceBtn = document.getElementById('voice-btn');
+  sendBtn.disabled  = true;
+  voiceBtn.disabled = true;
+  lastQueryTime = Date.now();
+  let remain = COOLDOWN_SEC;
+
+  cooldownTimer = setInterval(() => {
+    remain--;
+    sendBtn.textContent = remain + 's';
+    if (remain <= 0) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+      sendBtn.disabled  = false;
+      voiceBtn.disabled = false;
+      sendBtn.textContent = UI_TEXT[currentLang].send;
+    }
+  }, 1000);
+}
+
+// ════════════════════════════════════════════════════════
+// Excel 导出
+// ════════════════════════════════════════════════════════
+function hasTable(text) {
+  return /\|\s*[-:]+[-:\s|]*\|/.test(text);
+}
+
+function parseMarkdownTable(text) {
+  const lines = text.split('\n').filter(l => l.includes('|'));
+  return lines
+    .filter(l => !/^\s*\|[\s|:-]+\|\s*$/.test(l))  // 跳过分隔行
+    .map(l => l.split('|').map(c => c.trim()).filter(c => c !== ''));
+}
+
+function exportExcel(rawText) {
+  const data = parseMarkdownTable(rawText);
+  if (!data.length) return;
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '查询结果');
+  const filename = 'ai_query_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+  XLSX.writeFile(wb, filename);
+}
+
+// ════════════════════════════════════════════════════════
+// 消息渲染
+// ════════════════════════════════════════════════════════
 function appendMessage(role, html) {
-  const chat = document.getElementById('chat');
+  const chatEl = document.getElementById('chat');
   const div = document.createElement('div');
   div.className = 'msg ' + role;
   div.innerHTML = html;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return div;
+}
+
+function renderAssistantMessage(rawText) {
+  const chatEl = document.getElementById('chat');
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.innerHTML = marked.parse(rawText);
+
+  if (hasTable(rawText)) {
+    const btn = document.createElement('button');
+    btn.className = 'export-btn';
+    btn.textContent = '📥 导出 Excel';
+    btn.onclick = () => exportExcel(rawText);
+    div.appendChild(btn);
+  }
+
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
   return div;
 }
 
@@ -271,7 +595,24 @@ function showThinking() {
   return appendMessage('thinking', text + '<span class="dots"><span>.</span><span>.</span><span>.</span></span>');
 }
 
+// ════════════════════════════════════════════════════════
+// 发送消息
+// ════════════════════════════════════════════════════════
 async function sendMessage() {
+  // 未登录 → 弹出登录框
+  if (!isLoggedIn()) {
+    showLoginModal();
+    return;
+  }
+
+  // 冷却期检查
+  const elapsed = (Date.now() - lastQueryTime) / 1000;
+  if (elapsed < COOLDOWN_SEC && lastQueryTime > 0) {
+    const remain = Math.ceil(COOLDOWN_SEC - elapsed);
+    showToast(`请等待 ${remain} 秒后再查询`);
+    return;
+  }
+
   const input = document.getElementById('input');
   const msg = input.value.trim();
   if (!msg) return;
@@ -279,14 +620,34 @@ async function sendMessage() {
   appendMessage('user', escapeHtml(msg));
   input.value = '';
   autoResize();
+  startCooldown();
 
   const thinkingEl = showThinking();
   try {
     const res = await fetch('/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history })
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getToken(),
+      },
+      body: JSON.stringify({ message: msg, history }),
     });
+
+    // Token 过期或无效
+    if (res.status === 401) {
+      thinkingEl.remove();
+      clearToken();
+      showLoginModal();
+      return;
+    }
+
+    // 后端限速（极罕见，前端冷却已覆盖大部分情况）
+    if (res.status === 429) {
+      thinkingEl.remove();
+      showToast('操作过于频繁，请稍候再试');
+      return;
+    }
+
     const data = await res.json();
 
     history.push({ role: 'user', content: msg });
@@ -296,8 +657,8 @@ async function sendMessage() {
     }
 
     thinkingEl.remove();
-    appendMessage('assistant', marked.parse(data.reply));
-  } catch (e) {
+    renderAssistantMessage(data.reply);
+  } catch (_) {
     thinkingEl.remove();
     appendMessage('assistant', UI_TEXT[currentLang].error);
   }
@@ -323,19 +684,47 @@ document.getElementById('input').addEventListener('keydown', (e) => {
   }
 });
 
-// ---- 语言切换 ----
+// ════════════════════════════════════════════════════════
+// 快捷按钮
+// ════════════════════════════════════════════════════════
+function renderShortcuts() {
+  const box = document.getElementById('shortcuts');
+  box.innerHTML = '';
+  SHORTCUTS.forEach(([zh, en]) => {
+    const btn = document.createElement('button');
+    btn.className = 'shortcut-btn';
+    btn.textContent = currentLang === 'zh-CN' ? zh : en;
+    btn.onclick = () => {
+      const input = document.getElementById('input');
+      input.value = currentLang === 'zh-CN' ? zh : en;
+      input.focus();
+    };
+    box.appendChild(btn);
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// 语言切换
+// ════════════════════════════════════════════════════════
 function toggleLang() {
   currentLang = currentLang === 'zh-CN' ? 'en-US' : 'zh-CN';
   const text = UI_TEXT[currentLang];
-  document.getElementById('lang-btn').textContent = text.langBtn;
-  document.getElementById('title').textContent = text.title;
-  document.getElementById('input').placeholder = text.placeholder;
-  document.getElementById('send-btn').textContent = text.send;
+  document.getElementById('lang-btn').textContent  = text.langBtn;
+  document.getElementById('title').textContent     = text.title;
+  document.getElementById('input').placeholder     = text.placeholder;
+  document.getElementById('login-box').querySelector('h2').textContent = text.loginTitle;
+  document.getElementById('login-submit').textContent = text.loginBtn;
+  // 冷却期间保留倒计时数字，不覆盖
+  if (!cooldownTimer) {
+    document.getElementById('send-btn').textContent = text.send;
+  }
   if (recognition) recognition.lang = currentLang;
   renderShortcuts();
 }
 
-// ---- 语音输入 ----
+// ════════════════════════════════════════════════════════
+// 语音输入
+// ════════════════════════════════════════════════════════
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voiceBtn = document.getElementById('voice-btn');
 let recognition = null;
@@ -382,7 +771,23 @@ function toggleVoice() {
   }
 }
 
-renderShortcuts();
+// ════════════════════════════════════════════════════════
+// 初始化
+// ════════════════════════════════════════════════════════
+(async function init() {
+  // 拉取 reCAPTCHA Site Key（不阻塞登录框显示）
+  try {
+    const r = await fetch('/config');
+    const cfg = await r.json();
+    recaptchaSiteKey = cfg.recaptcha_site_key || '';
+  } catch (_) { /* 离线/本地开发忽略 */ }
+
+  if (!isLoggedIn()) {
+    showLoginModal();
+  }
+
+  renderShortcuts();
+})();
 </script>
 
 </body>
