@@ -241,7 +241,8 @@
     display: none;
     text-align: center;
   }
-  #recaptcha-container { margin-bottom: 14px; display: flex; justify-content: center; }
+  /* reCAPTCHA v3 badge 可隐藏（已在登录框内用文字说明替代） */
+  .grecaptcha-badge { visibility: hidden; }
   #login-submit {
     width: 100%;
     background: #1f6feb;
@@ -272,7 +273,6 @@
       <input type="password" id="login-pwd" placeholder="••••••••" autocomplete="current-password">
     </div>
     <div id="login-error"></div>
-    <div id="recaptcha-container"></div>
     <button id="login-submit" onclick="doLogin()">登录</button>
   </div>
 </div>
@@ -309,7 +309,7 @@ let currentLang = 'zh-CN';
 let lastQueryTime = 0;
 let cooldownTimer = null;
 let recaptchaSiteKey = '';
-let recaptchaWidgetId = null;
+let recaptchaReady = false;   // v3 script 加载完成标志
 let failCount = 0;
 
 // ════════════════════════════════════════════════════════
@@ -409,25 +409,26 @@ function hideLoginModal() {
   document.getElementById('login-overlay').classList.remove('show');
 }
 
-function showRecaptcha() {
-  if (!recaptchaSiteKey) return;
-  const container = document.getElementById('recaptcha-container');
-  if (recaptchaWidgetId !== null) return; // 已经渲染过
+// reCAPTCHA v3：动态加载脚本（仅加载一次），加载完成后设 recaptchaReady = true
+function loadRecaptchaV3() {
+  if (recaptchaReady || !recaptchaSiteKey) return;
+  window._onRecaptchaV3Load = () => { recaptchaReady = true; };
+  const s = document.createElement('script');
+  s.src = 'https://www.google.com/recaptcha/api.js?render=' + recaptchaSiteKey +
+          '&onload=_onRecaptchaV3Load';
+  document.head.appendChild(s);
+}
 
-  function renderWidget() {
-    recaptchaWidgetId = grecaptcha.render(container, { sitekey: recaptchaSiteKey });
-  }
-
-  if (window.grecaptcha && window.grecaptcha.render) {
-    renderWidget();
-  } else {
-    // 动态加载 reCAPTCHA 脚本
-    window._onRecaptchaLoad = renderWidget;
-    const s = document.createElement('script');
-    s.src = 'https://www.google.com/recaptcha/api.js?render=explicit&onload=_onRecaptchaLoad&hl=' +
-            (currentLang === 'zh-CN' ? 'zh-CN' : 'en');
-    document.head.appendChild(s);
-  }
+// 获取 v3 token（失败时返回空字符串）
+function getRecaptchaToken(action) {
+  return new Promise((resolve) => {
+    if (!recaptchaSiteKey || !window.grecaptcha) { resolve(''); return; }
+    grecaptcha.ready(() => {
+      grecaptcha.execute(recaptchaSiteKey, { action })
+        .then(resolve)
+        .catch(() => resolve(''));
+    });
+  });
 }
 
 async function doLogin() {
@@ -441,16 +442,10 @@ async function doLogin() {
 
   const body = { email, password: pwd };
 
-  // 失败 3 次后附上 reCAPTCHA token
-  if (failCount >= 3 && window.grecaptcha && recaptchaWidgetId !== null) {
-    const rcToken = grecaptcha.getResponse(recaptchaWidgetId);
-    if (!rcToken) {
-      errEl.textContent = '请完成 reCAPTCHA 验证';
-      errEl.style.display = 'block';
-      btn.disabled = false;
-      return;
-    }
-    body.recaptcha_token = rcToken;
+  // 失败 3 次后附上 reCAPTCHA v3 token（无感执行，无需用户操作）
+  if (failCount >= 3) {
+    const rcToken = await getRecaptchaToken('login');
+    if (rcToken) body.recaptcha_token = rcToken;
   }
 
   try {
@@ -469,16 +464,8 @@ async function doLogin() {
     } else {
       failCount++;
       const detail = (await res.json().catch(() => ({}))).detail || '';
-
-      if (failCount >= 3 && recaptchaSiteKey) {
-        showRecaptcha();
-      }
-      if (recaptchaWidgetId !== null && window.grecaptcha) {
-        grecaptcha.reset(recaptchaWidgetId);
-      }
-
-      if (detail === 'need_recaptcha' || detail === 'recaptcha_failed') {
-        errEl.textContent = '请完成 reCAPTCHA 验证后重试';
+      if (detail === 'recaptcha_failed') {
+        errEl.textContent = '系统检测到异常操作，请稍后再试';
       } else {
         errEl.textContent = '邮箱或密码错误，请重试';
       }
@@ -775,11 +762,12 @@ function toggleVoice() {
 // 初始化
 // ════════════════════════════════════════════════════════
 (async function init() {
-  // 拉取 reCAPTCHA Site Key（不阻塞登录框显示）
+  // 拉取 reCAPTCHA v3 Site Key 并预加载脚本（不阻塞登录框显示）
   try {
     const r = await fetch('/config');
     const cfg = await r.json();
     recaptchaSiteKey = cfg.recaptcha_site_key || '';
+    loadRecaptchaV3();  // 提前加载，首次登录失败第 3 次时已就绪
   } catch (_) { /* 离线/本地开发忽略 */ }
 
   if (!isLoggedIn()) {

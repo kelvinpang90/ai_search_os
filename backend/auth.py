@@ -34,7 +34,9 @@ def verify_token(token: str) -> dict | None:
 
 
 async def verify_recaptcha(token: str) -> bool:
-    """调用 Google reCAPTCHA v2 验证接口。未配置 secret 时本地开发直接放行。"""
+    """调用 Google reCAPTCHA v3 验证接口。未配置 secret 时本地开发直接放行。
+    v3 返回 score（0.0-1.0），>= 0.5 视为人类操作。
+    """
     if not RECAPTCHA_SECRET:
         return True
     async with httpx.AsyncClient() as client:
@@ -42,4 +44,5 @@ async def verify_recaptcha(token: str) -> bool:
             'https://www.google.com/recaptcha/api/siteverify',
             data={'secret': RECAPTCHA_SECRET, 'response': token},
         )
-        return r.json().get('success', False)
+        data = r.json()
+        return data.get('success', False) and data.get('score', 0) >= 0.5
