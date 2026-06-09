@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from auth import (
     create_token,
     failed_attempts,
-    pwd_context,
+    verify_password,
     verify_recaptcha,
     verify_token,
 )
@@ -68,7 +68,7 @@ async def login(body: dict, request: Request):
     )
 
     user = rows[0] if rows else None
-    if not user or not pwd_context.verify(password, user['password_hash']):
+    if not user or not verify_password(password, user['password_hash']):
         failed_attempts[ip] = failed_attempts.get(ip, 0) + 1
         need_captcha = failed_attempts[ip] >= 3
         raise HTTPException(

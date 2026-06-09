@@ -2,15 +2,9 @@
 import os
 from datetime import datetime, timedelta
 
+import bcrypt as _bcrypt
 import httpx
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(
-    schemes=['bcrypt'],
-    deprecated='auto',
-    bcrypt__truncate_error=False,  # 与 CRM 保持一致：超 72 字节时截断而非报错
-)
 
 JWT_SECRET = os.getenv('JWT_SECRET', '')
 JWT_EXPIRE_HOURS = int(os.getenv('JWT_EXPIRE_HOURS', 24))
@@ -18,6 +12,16 @@ RECAPTCHA_SECRET = os.getenv('RECAPTCHA_SECRET_KEY', '')
 
 # 内存中记录各 IP 的连续失败次数；进程重启后清零
 failed_attempts: dict[str, int] = {}
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """直接用 bcrypt 库验证，绕过 passlib 的 72 字节预检。
+    bcrypt 原生行为是静默截断超长密码，与 CRM 存储时一致。
+    """
+    try:
+        return _bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception:
+        return False
 
 
 def create_token(user_id: str, email: str, role: str) -> str:
