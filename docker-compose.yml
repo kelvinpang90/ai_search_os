@@ -35,7 +35,8 @@ services:
     networks: [proxy_net, data_net]
     # 不发布 host 端口；nginx 通过 proxy_net 访问 aisearch_backend:8000
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # The backend image has no curl; use its own Python so the probe reflects the app.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
       interval: 15s
       timeout: 5s
       retries: 3
